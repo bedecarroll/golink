@@ -29,6 +29,9 @@ func TestServeGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	oldFallback := fallbackShort
+	fallbackShort = ""
+	t.Cleanup(func() { fallbackShort = oldFallback })
 	db.Save(&Link{Short: "who", Long: "http://who/"})
 	db.Save(&Link{Short: "me", Long: "/who/{{.User}}"})
 	db.Save(&Link{Short: "invalid-var", Long: "/who/{{.Invalid}}"})
@@ -269,6 +272,47 @@ func TestServeSave(t *testing.T) {
 				t.Errorf("serveSave(%q, %q) = %d; want %d", tt.short, tt.long, w.Code, tt.wantStatus)
 			}
 		})
+	}
+}
+
+func TestServeGoFallback(t *testing.T) {
+	var err error
+	db, err = NewSQLiteDB(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Save(&Link{Short: "ai", Long: "http://ai/{{.Path}}"})
+	old := fallbackShort
+	fallbackShort = "ai"
+	t.Cleanup(func() { fallbackShort = old })
+
+	tests := []struct {
+		path     string
+		wantLink string
+	}{
+		{"/foo", "http://ai/foo"},
+		{"/", "http://ai/"},
+	}
+
+	for _, tt := range tests {
+		r := httptest.NewRequest("GET", tt.path, nil)
+		w := httptest.NewRecorder()
+		serveHandler().ServeHTTP(w, r)
+		if w.Code != http.StatusFound {
+			t.Errorf("%s = %d; want %d", tt.path, w.Code, http.StatusFound)
+		}
+		if got := w.Header().Get("Location"); got != tt.wantLink {
+			t.Errorf("%s redirect = %q; want %q", tt.path, got, tt.wantLink)
+		}
+	}
+
+	// missing fallback link should fall back to home
+	fallbackShort = "missing"
+	r := httptest.NewRequest("GET", "/missing", nil)
+	w := httptest.NewRecorder()
+	serveHandler().ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("missing link status = %d; want %d", w.Code, http.StatusNotFound)
 	}
 }
 
