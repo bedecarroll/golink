@@ -86,7 +86,10 @@ var embeddedFS embed.FS
 // db stores short links.
 var db *SQLiteDB
 
-var localClient *tailscale.LocalClient
+var (
+	localClient   *tailscale.LocalClient
+	fallbackShort = os.Getenv("GOLINK_FALLBACK")
+)
 
 func Run() error {
 	flag.Parse()
@@ -426,6 +429,13 @@ func serveHandler() http.Handler {
 	mux.HandleFunc("/.opensearch", serveOpenSearch)
 	mux.HandleFunc("/.all", serveAll)
 	mux.HandleFunc("/.delete/", serveDelete)
+	mux.HandleFunc("/.home", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			serveSave(w, r)
+			return
+		}
+		serveHome(w, r, "")
+	})
 	mux.Handle("/.static/", http.StripPrefix("/.", http.FileServer(http.FS(embeddedFS))))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -521,6 +531,9 @@ func serveGo(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/" {
 		switch r.Method {
 		case "GET":
+			if serveFallback(w, r) {
+				return
+			}
 			serveHome(w, r, "")
 		case "POST":
 			serveSave(w, r)
@@ -547,6 +560,9 @@ func serveGo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if errors.Is(err, fs.ErrNotExist) {
+		if serveFallback(w, r) {
+			return
+		}
 		w.WriteHeader(http.StatusNotFound)
 		serveHome(w, r, short)
 		return
@@ -585,6 +601,46 @@ func serveGo(w http.ResponseWriter, r *http.Request) {
 	// Instead, manually set status and Location header.
 	w.Header().Set("Location", target.String())
 	w.WriteHeader(http.StatusFound)
+}
+
+// serveFallback redirects to the configured fallback link, if any.
+// It returns true if a response was written.
+func serveFallback(w http.ResponseWriter, r *http.Request) bool {
+	if fallbackShort == "" {
+		return false
+	}
+	link, err := db.Load(fallbackShort)
+	if err != nil {
+		return false
+	}
+
+	stats.mu.Lock()
+	if stats.clicks == nil {
+		stats.clicks = make(ClickStats)
+	}
+	stats.clicks[link.Short]++
+	if stats.dirty == nil {
+		stats.dirty = make(ClickStats)
+	}
+	stats.dirty[link.Short]++
+	stats.mu.Unlock()
+
+	cu, _ := currentUser(r)
+	env := expandEnv{Now: time.Now().UTC(), Path: strings.TrimPrefix(r.URL.Path, "/"), user: cu.login, query: r.URL.Query()}
+	target, err := expandLink(link.Long, env)
+	if err != nil {
+		log.Printf("expanding %q: %v", link.Long, err)
+		if errors.Is(err, errNoUser) {
+			http.Error(w, "link requires a valid user", http.StatusUnauthorized)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return true
+	}
+
+	w.Header().Set("Location", target.String())
+	w.WriteHeader(http.StatusFound)
+	return true
 }
 
 // acceptHTML returns whether the request can accept a text/html response.

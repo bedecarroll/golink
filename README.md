@@ -88,6 +88,11 @@ Users just need to have Tailscale installed and connected to the tailnet.
 
 [MagicDNS]: https://tailscale.com/kb/1081/magicdns/
 
+## Fallback link
+
+golink can redirect unknown paths to a designated fallback short link. Set the fallback by specifying the short name in the `GOLINK_FALLBACK` environment variable when starting the server. If the specified link exists, visiting `http://go/` or any unknown link will resolve to that short link with the original path preserved. The standard home page is available at `http://go/.home`.
+
+
 ## Running in production
 
 golink compiles as a single static binary (including the frontend) and can be deployed and run like any other binary.

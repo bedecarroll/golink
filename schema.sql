@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS Links (
 );
 
 CREATE TABLE IF NOT EXISTS Stats (
-	ID       TEXT    NOT NULL DEFAULT "",
-	Created  INTEGER NOT NULL DEFAULT (strftime('%s', 'now')), -- unix seconds
-	Clicks   INTEGER
+        ID       TEXT    NOT NULL DEFAULT "",
+        Created  INTEGER NOT NULL DEFAULT (strftime('%s', 'now')), -- unix seconds
+        Clicks   INTEGER
 );
